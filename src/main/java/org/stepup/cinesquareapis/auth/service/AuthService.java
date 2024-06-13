@@ -1,13 +1,13 @@
 package org.stepup.cinesquareapis.auth.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.stepup.cinesquareapis.auth.dto.SignInRequest;
-import org.stepup.cinesquareapis.auth.dto.SignInResponse;
-import org.stepup.cinesquareapis.auth.dto.SignUpRequest;
-import org.stepup.cinesquareapis.auth.dto.SignUpResponse;
+import org.stepup.cinesquareapis.auth.dto.*;
 import org.stepup.cinesquareapis.auth.entity.UserRefreshToken;
 import org.stepup.cinesquareapis.auth.jwt.TokenProvider;
 import org.stepup.cinesquareapis.auth.repository.UserRefreshTokenRepository;
@@ -15,6 +15,8 @@ import org.stepup.cinesquareapis.common.exception.enums.CustomErrorCode;
 import org.stepup.cinesquareapis.common.exception.exception.RestApiException;
 import org.stepup.cinesquareapis.user.entity.User;
 import org.stepup.cinesquareapis.user.repository.UserRepository;
+
+import java.time.LocalDateTime;
 
 @RequiredArgsConstructor
 @Service
@@ -50,7 +52,7 @@ public class AuthService {
     }
 
     /**
-     * 로그인 Access Token, Refresh Token 생성
+     * 로그인  발급
      */
     @Transactional
     public SignInResponse signIn(SignInRequest request) {
@@ -90,4 +92,47 @@ public class AuthService {
         // User 정보 + token 정보
         return new SignInResponse(user, accessToken, refreshToken);
     }
+
+    /**
+     * Access Token, Refresh Token 재발급
+     */
+    @Transactional
+    public ReissueAccessTokenResponse reissueAccessToken(HttpServletRequest request, String refreshTokenHeader) throws JsonProcessingException {
+        String accessToken = tokenProvider.parseBearerToken(request, HttpHeaders.AUTHORIZATION);
+        String refreshToken = refreshTokenHeader;
+
+        // Refresh 토큰 검증
+        tokenProvider.validateRefreshToken(accessToken, refreshToken);
+
+        try {
+            // 새 Access Token 발급
+            String newAccessToken = tokenProvider.recreateAccessToken(accessToken);
+
+            // 새 Refresh Token 발급 및 쿠키 설정
+            String newRefreshToken = tokenProvider.createRefreshToken();
+
+            // 로그인 정보 객체
+            org.springframework.security.core.userdetails.User securityUser = tokenProvider.getUserFromAccessToken(newAccessToken);
+
+            // 새로운 Refresh Token을 DB에 저장
+            Integer userId = Integer.parseInt(securityUser.getUsername());
+            org.stepup.cinesquareapis.user.entity.User cineUser = userRepository.findById(userId)
+                    .orElseThrow(() -> new RestApiException(CustomErrorCode.NOT_FOUND_USER));
+
+            UserRefreshToken userRefreshToken = userRefreshTokenRepository.findById(userId)
+                    .orElseThrow(() -> new RestApiException(CustomErrorCode.NOT_FOUND_USER));
+            userRefreshToken.setRefreshTokenExpiryDate(LocalDateTime.now().plusMinutes(10));
+            userRefreshToken.setRefreshToken(newRefreshToken);
+            userRefreshTokenRepository.save(userRefreshToken);
+
+            return new ReissueAccessTokenResponse(newAccessToken, newRefreshToken);
+        } catch (RestApiException ex) {
+            // 이미 정의된 사용자 정의 예외를 다시 던짐
+            throw ex;
+        } catch (Exception ex) {
+            // 다른 예외를 런타임 예외로 래핑하여 던짐
+            throw new RuntimeException("Error reissuing access token: " + ex.getMessage(), ex);
+        }
+    }
+
 }

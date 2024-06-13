@@ -3,8 +3,11 @@ package org.stepup.cinesquareapis.auth.jwt;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.*;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.PropertySource;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.stepup.cinesquareapis.auth.repository.UserRefreshTokenRepository;
@@ -15,9 +18,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.Base64;
-import java.util.Date;
-import java.util.Map;
+import java.util.*;
 
 @PropertySource("classpath:jwt.yml")
 @Service // JWT 생성 및 복호화
@@ -43,9 +44,9 @@ public class TokenProvider {
         this.userRefreshTokenRepository = userRefreshTokenRepository;
     }
 
-    // refresh token 만료 기간 조회
+    // refresh token 만료 일시 조회
     public int getRefreshTokenExpirationTime() {
-        return Integer.parseInt(accessTokenExpirationTime);
+        return Integer.parseInt(refreshTokenExpirationTime);
     }
 
     // access token 생성
@@ -85,7 +86,7 @@ public class TokenProvider {
     public String recreateAccessToken(String oldAccessToken) throws JsonProcessingException {
         String subject = decodeJwtPayloadSubject(oldAccessToken);
 
-        Integer userId = Integer.parseInt(decodeJwtPayloadSubject(oldAccessToken).split(":")[0]);
+        Integer userId = Integer.parseInt(subject.split(":")[0]);
 
         userRefreshTokenRepository.findById(userId)
                 .ifPresentOrElse(
@@ -99,22 +100,39 @@ public class TokenProvider {
     }
 
     @Transactional(readOnly = true)
-    public void validateRefreshToken(String refreshToken, String oldAccessToken) throws JsonProcessingException {
-        validateAndParseToken(refreshToken);
+    public void validateRefreshToken(String oldAccessToken, String refreshToken) throws JsonProcessingException {
+        Jws<Claims> claimsJws;
+        try {
+            claimsJws = validateAndParseToken(refreshToken);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid refresh token", e);
+        }
 
         Integer userId = Integer.parseInt(decodeJwtPayloadSubject(oldAccessToken).split(":")[0]);
 
         userRefreshTokenRepository.findById(userId)
-                .filter(userRefreshToken -> userRefreshToken.validateRefreshToken(refreshToken))
+                .filter(userRefreshToken -> {
+                    // 만료 시간 체크
+                    Date expiration = claimsJws.getBody().getExpiration();
+                    if (expiration.before(new Date())) {
+                        throw new ExpiredJwtException(null, null, "Refresh token expired.");
+                    }
+                    return userRefreshToken.validateRefreshToken(refreshToken);
+                })
                 .orElseThrow(() -> new ExpiredJwtException(null, null, "Refresh token expired."));
     }
 
-    // validateTokenAndGetSubject에서 따로 분리
+    // validateAndParseToken
     private Jws<Claims> validateAndParseToken(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(secretKey.getBytes())
-                .build()
-                .parseClaimsJws(token);
+        try {
+            return Jwts.parserBuilder()
+                    .setSigningKey(secretKey.getBytes())
+                    .build()
+                    .parseClaimsJws(token);
+        } catch (JwtException e) {
+            System.err.println("JWT validation failed: " + e.getMessage());
+            throw e;
+        }
     }
 
     private String decodeJwtPayloadSubject(String oldAccessToken) throws JsonProcessingException {
@@ -124,5 +142,32 @@ public class TokenProvider {
                 new String(Base64.getDecoder().decode(oldAccessToken.split("\\.")[1]), StandardCharsets.UTF_8),
                 Map.class
         ).get("sub").toString();
+    }
+
+    // Bearer 토큰 파싱 메서드
+    // HTTP 요청의 헤더에서 headerName(Authorization) 으로 값을 찾아서
+    // Bearer로 시작하는지 확인 후
+    // 접두어를 제외한 토큰값으로 파싱
+    // 그 외에는 null을 반환
+    public String parseBearerToken(HttpServletRequest request, String headerName) {
+        return Optional.ofNullable(request.getHeader(headerName))
+                .filter(token -> token.length() > 7 && token.substring(0, 7).equalsIgnoreCase("Bearer "))
+                .map(token -> token.substring(7))
+                .orElse(null);
+    }
+
+    // 로그인 정보 객체 반환 메서드
+    // 파싱된 토큰이 null이 아니면서 길이가 너무 짧지 않을 때
+    // 토큰을 복호화하여
+    // userId와 RoleType을 토대로 스프링 시큐리티에서 사용하는 User 객체를 반환
+    // 그 외에는 익명 객체를 생성
+    public User getUserFromAccessToken(String token) {
+        String[] split = Optional.ofNullable(token)
+                .filter(subject -> subject.length() >= 10)
+                .map(t -> validateTokenAndGetSubject(t))
+                .orElse("anonymous:anonymous")
+                .split(":");
+
+        return new User(split[0], "", List.of(new SimpleGrantedAuthority(split[1])));
     }
 }

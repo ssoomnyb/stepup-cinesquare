@@ -1,17 +1,16 @@
 package org.stepup.cinesquareapis.auth.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.stepup.cinesquareapis.auth.dto.SignInRequest;
-import org.stepup.cinesquareapis.auth.dto.SignInResponse;
-import org.stepup.cinesquareapis.auth.dto.SignUpRequest;
-import org.stepup.cinesquareapis.auth.dto.SignUpResponse;
+import org.stepup.cinesquareapis.auth.dto.*;
 import org.stepup.cinesquareapis.auth.service.AuthService;
 import org.stepup.cinesquareapis.common.dto.DataResponse;
 import org.stepup.cinesquareapis.common.dto.ResultResponse;
@@ -53,9 +52,9 @@ public class AuthController {
     }
 
     /**
-     * 로그인 Access Token, Refresh Token 생성
+     * 로그인 (Access Token, Refresh Token 발급)
      */
-    @Operation(summary = "로그인 Access Token, Refresh Token 생성")
+    @Operation(summary = "로그인 (Access Token, Refresh Token 발급)")
     @ApiResponses({
             @ApiResponse(responseCode = "200", useReturnTypeSchema = true),
             @ApiResponse(responseCode = "20100", description = "account로 조회한 user가 존재하지 않는 경우의 에러코드", content = @Content()),
@@ -64,6 +63,17 @@ public class AuthController {
     @PostMapping("sign-in")
     public ResponseEntity<DataResponse<SignInResponse>> signIn(@RequestBody SignInRequest request) {
         SignInResponse response = authService.signIn(request);
+
+        return ResponseEntity.ok(new DataResponse(response));
+    }
+
+    /**
+     * Access Token, Refresh Token 재발급
+     */
+    @Operation(summary = "Access Token 재발급")
+    @PostMapping("reissue-access-token")
+    public ResponseEntity<DataResponse<SignInResponse>> reissueAccessToken(HttpServletRequest request, @RequestHeader(value = "Refresh-Token", required = true) String refreshToken) throws JsonProcessingException {
+        ReissueAccessTokenResponse response = authService.reissueAccessToken(request, refreshToken);
 
         return ResponseEntity.ok(new DataResponse(response));
     }
