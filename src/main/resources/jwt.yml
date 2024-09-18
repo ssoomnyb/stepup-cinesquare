@@ -2,10 +2,10 @@
 secret-key: NiOeyFbN1Gqo10bPgUyTFsRMkJpGLXSvGP04eFqj5B30r5TcrtlSXfQ7TndvYjNvfkEKLqILn0j1SmKODO1Yw3JpBBgI3nVPEahqxeY8qbPSFGyzyEVxnl4AQcrnVneI
 
 # 토큰 만료 시간: 14일, 60*24*14(분)
-access-token-expiration-time: 5
+access-token-expiration-time: 43200
 
 # 리프레시 토큰 유효 시간: 30일, 60*24*30(분)
-refresh-token-expiration-time: 10
+refresh-token-expiration-time: 43200
 
 # 토큰 발급자
 issuer: cinesquare
