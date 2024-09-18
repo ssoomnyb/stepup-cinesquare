@@ -39,7 +39,6 @@ public class MovieDbLoadingController {
      *
      * @return
      */
-    @Hidden
     @PostMapping("kofic/{kofic_movie_code}")
     public void createKoficMovie(@PathVariable("kofic_movie_code") String koficMovieCode) {
         // 영화 기본 정보 저장
@@ -56,7 +55,6 @@ public class MovieDbLoadingController {
      *
      * @return
      */
-    @Hidden
     @PostMapping("cine/{movie_id}/thumbnail")
     public void updateMovieSubInfo(int movieId) {
         int[] arr = {movieId};
@@ -64,15 +62,14 @@ public class MovieDbLoadingController {
     }
 
     /**
-     * 박스오피스 수동 업로드 (업로드 하고자 하는 주의 다음주 월요일 날짜를 yyyyMMdd 형식으로 입력
+     * 박스오피스 수동 업로드 (업로드 하고자 하는 주의 다음주 월요일 날짜를 yyyyMMdd 형식으로 입력)
      *
      * @return
      */
-//    @Hidden
     @PostMapping("cine/boxoffice")
     public void createBoxofficeManual(@RequestParam("monday_date") String mondaDayte) throws IOException {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        movieDbLoadingService.saveMovieBoxoffice(10,  LocalDate.parse(mondaDayte, formatter));
+        movieDbLoadingService.saveMovieBoxoffice(10, LocalDate.parse(mondaDayte, formatter));
     }
 
     /**
