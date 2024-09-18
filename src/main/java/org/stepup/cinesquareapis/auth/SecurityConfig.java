@@ -20,7 +20,7 @@ import org.stepup.cinesquareapis.auth.jwt.JwtAuthenticationFilter;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private final String[] allowedUrls = {"/", "/swagger-ui/**", "/v3/**"};
+    private final String[] allowedUrls = {"/", "/swagger-ui/**", "/v3/**", "/api/auth/reissue-access-token"};
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
@@ -28,7 +28,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(allowedUrls).permitAll()
-                        .requestMatchers("/api/**").authenticated() // /api/** 경로 인증 설정
+                        //.requestMatchers("/api/**").authenticated() // /api/** 경로 인증 설정/
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sessionManagement ->

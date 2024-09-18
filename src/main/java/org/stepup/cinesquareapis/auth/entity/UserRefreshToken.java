@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.stepup.cinesquareapis.user.entity.User;
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
+@Setter
 @Entity
 @Table(name = "tb_user_refresh_token")
 public class UserRefreshToken {
@@ -40,9 +42,9 @@ public class UserRefreshToken {
     public UserRefreshToken(User user, String refreshToken, int time) {
         this.user = user;
         this.refreshToken = refreshToken;
-        this.refreshTokenExpiryDate = calculateExpiryDate(time);
         this.created = LocalDateTime.now();
         this.updated = LocalDateTime.now();
+        this.refreshTokenExpiryDate = calculateExpiryDate(time);
     }
 
     public void updateRefreshToken(String refreshToken, int time) {
