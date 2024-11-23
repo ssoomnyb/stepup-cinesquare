@@ -52,10 +52,10 @@ public class SwaggerConfig {
     public OperationCustomizer globalHeader() {
         return (operation, handlerMethod) -> {
             operation.addParametersItem(new Parameter()
-                    .in("cookie")
+                    .in("header")
                     .schema(new StringSchema().name("Refresh-Token"))
-                    .name("Refresh-Token")
-                    .description("리프레시 토큰 (Header > Cookies > Refresh-Token 으로 요청할 수 있음"));
+                    .name("Refresh-Token"));
+//                    .description("리프레시 토큰 (Header > Cookies > Refresh-Token 으로 요청할 수 있음"));
             return operation;
         };
     }

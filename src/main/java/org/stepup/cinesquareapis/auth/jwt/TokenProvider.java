@@ -10,6 +10,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.stepup.cinesquareapis.auth.entity.UserRefreshToken;
 import org.stepup.cinesquareapis.auth.repository.UserRefreshTokenRepository;
 
 import javax.crypto.spec.SecretKeySpec;
@@ -44,23 +45,23 @@ public class TokenProvider {
         this.userRefreshTokenRepository = userRefreshTokenRepository;
     }
 
-    // refresh token 만료 일시 조회
+    // refreshtoken 만료 일시 조회
     public int getRefreshTokenExpirationTime() {
         return Integer.parseInt(refreshTokenExpirationTime);
     }
 
-    // access token 생성
+    // AccessToken 생성
     public String createAccessToken(String userSpecification) {
         return Jwts.builder()
-                .signWith(new SecretKeySpec(secretKey.getBytes(), SignatureAlgorithm.HS512.getJcaName()))   // HS512 알고리즘을 사용하여 secretKey를 이용해 서명
+                .signWith(new SecretKeySpec(secretKey.getBytes(), SignatureAlgorithm.HS512.getJcaName()))  // HS512 알고리즘을 사용하여 secretKey를 이용해 서명
                 .setSubject(userSpecification)  // JWT 토큰 제목
                 .setIssuer(issuer)  // JWT 토큰 발급자
-                .setIssuedAt(Timestamp.valueOf(LocalDateTime.now()))    // JWT 토큰 발급 시간
-                .setExpiration(Date.from(Instant.now().plus(Long.parseLong(accessTokenExpirationTime), ChronoUnit.MINUTES)))    // JWT 토큰 만료 시간
-                .compact(); // JWT 토큰 생성
+                .setIssuedAt(Timestamp.valueOf(LocalDateTime.now()))  // JWT 토큰 발급 시간
+                .setExpiration(Date.from(Instant.now().plus(Long.parseLong(accessTokenExpirationTime), ChronoUnit.MINUTES)))  // JWT 토큰 만료 시간
+                .compact();  // JWT 토큰 생성
     }
 
-    // refresh token 생성
+    // RefreshToken 생성
     // 리프레시 토큰은 사용자와 관련된 정보를 전혀 담지 않을 것이기 때문에 subject는 따로 설정하지 않음
     // 발급자와 발급시간, 만료시간만 설정
     public String createRefreshToken() {
@@ -82,57 +83,39 @@ public class TokenProvider {
                 .getSubject();
     }
 
+    // AccessToken 재발급
     @Transactional
     public String recreateAccessToken(String oldAccessToken) throws JsonProcessingException {
         String subject = decodeJwtPayloadSubject(oldAccessToken);
 
         Integer userId = Integer.parseInt(subject.split(":")[0]);
 
-        userRefreshTokenRepository.findById(userId)
-                .ifPresentOrElse(
-                        userRefreshToken -> {
-                            userRefreshTokenRepository.save(userRefreshToken);
-                        },
-                        () -> { throw new ExpiredJwtException(null, null, "Refresh token expired."); }
-                );
+        UserRefreshToken userRefreshToken = userRefreshTokenRepository.findById(userId)
+                .orElseThrow(() -> new ExpiredJwtException(null, null, "Refresh token expired."));
+
+        if (isRefreshTokenExpired(userRefreshToken)) {
+            throw new ExpiredJwtException(null, null, "Refresh token has expired.");
+        }
 
         return createAccessToken(subject);
     }
 
-    @Transactional(readOnly = true)
-    public void validateRefreshToken(String oldAccessToken, String refreshToken) throws JsonProcessingException {
-        Jws<Claims> claimsJws;
-        try {
-            claimsJws = validateAndParseToken(refreshToken);
-        } catch (JwtException | IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid refresh token", e);
-        }
-
-        Integer userId = Integer.parseInt(decodeJwtPayloadSubject(oldAccessToken).split(":")[0]);
-
-        userRefreshTokenRepository.findById(userId)
-                .filter(userRefreshToken -> {
-                    // 만료 시간 체크
-                    Date expiration = claimsJws.getBody().getExpiration();
-                    if (expiration.before(new Date())) {
-                        throw new ExpiredJwtException(null, null, "Refresh token expired.");
-                    }
-                    return userRefreshToken.validateRefreshToken(refreshToken);
-                })
-                .orElseThrow(() -> new ExpiredJwtException(null, null, "Refresh token expired."));
+    private boolean isRefreshTokenExpired(UserRefreshToken userRefreshToken) {
+        return userRefreshToken.getRefreshTokenExpiryDate().isBefore(LocalDateTime.now());
     }
 
-    // validateAndParseToken
+    @Transactional(readOnly = true)
+    public void validateRefreshToken(String refreshToken, String oldAccessToken) throws JsonProcessingException {
+        validateAndParseToken(refreshToken);
+        String userId = decodeJwtPayloadSubject(oldAccessToken).split(":")[0];
+    }
+
+    // JWT 토큰 토큰 유효성 검사
     private Jws<Claims> validateAndParseToken(String token) {
-        try {
-            return Jwts.parserBuilder()
-                    .setSigningKey(secretKey.getBytes())
-                    .build()
-                    .parseClaimsJws(token);
-        } catch (JwtException e) {
-            System.err.println("JWT validation failed: " + e.getMessage());
-            throw e;
-        }
+        return Jwts.parserBuilder()
+                .setSigningKey(secretKey.getBytes())
+                .build()
+                .parseClaimsJws(token);
     }
 
     private String decodeJwtPayloadSubject(String oldAccessToken) throws JsonProcessingException {

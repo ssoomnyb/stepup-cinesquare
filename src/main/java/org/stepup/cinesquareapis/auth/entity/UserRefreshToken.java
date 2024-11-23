@@ -17,7 +17,6 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "tb_user_refresh_token")
 public class UserRefreshToken {
-    // 연관된 회원ID를 외래키 겸 기본키로 지정
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer userId;

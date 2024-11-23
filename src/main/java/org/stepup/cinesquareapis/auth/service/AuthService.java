@@ -52,7 +52,7 @@ public class AuthService {
     }
 
     /**
-     * 로그인  발급
+     * 로그인 발급
      */
     @Transactional
     public SignInResponse signIn(SignInRequest request) {
@@ -65,24 +65,25 @@ public class AuthService {
             throw new RestApiException(CustomErrorCode.INVALID_PASSWORD);
         }
 
-        // Access Token, Refresh Token 생성
+        // AccessToken, RefreshToken 생성
         String userSpecification = String.format("%s:%s", user.getUserId(), user.getType());
         String accessToken = tokenProvider.createAccessToken(userSpecification);
         String refreshToken = tokenProvider.createRefreshToken();
+
+        // 리프레시 토큰이 이미 있으면 토큰을 갱신하고 없으면 토큰을 추가
         int expirationTime = tokenProvider.getRefreshTokenExpirationTime();
 
-        // Refresh Token 조회
         userRefreshTokenRepository.findById(user.getUserId())
                 .ifPresentOrElse(
-                        // DB에 Refresh Token이 존재하면
-                        existingToken -> {
-                            // Refresh Token 만료 여부 확인, 만료 되면 업데이트
-                            if (existingToken.isExpired()) {
-                                existingToken.updateRefreshToken(refreshToken, expirationTime);
-                                userRefreshTokenRepository.save(existingToken);
+                        // DB에 RefreshToken이 존재하면
+                        token -> {
+                            // RefreshToken 만료 여부 확인, 만료 되면 업데이트
+                            if (token.isExpired()) {
+                                token.updateRefreshToken(refreshToken, expirationTime);
+                                userRefreshTokenRepository.save(token);
                             }
                         },
-                        //  DB에 Refresh Token이 존재하지 않으면, 저장
+                        // DB에 RefreshToken이 존재하지 않으면, 저장
                         () -> {
                             UserRefreshToken newUserRefreshToken = new UserRefreshToken(user, refreshToken, expirationTime);
                             userRefreshTokenRepository.save(newUserRefreshToken);
@@ -94,7 +95,7 @@ public class AuthService {
     }
 
     /**
-     * Access Token, Refresh Token 재발급
+     * AccessToken, RefreshToken 재발급
      */
     @Transactional
     public ReissueAccessTokenResponse reissueAccessToken(HttpServletRequest request, String refreshTokenHeader) throws JsonProcessingException {
@@ -105,16 +106,16 @@ public class AuthService {
         tokenProvider.validateRefreshToken(accessToken, refreshToken);
 
         try {
-            // 새 Access Token 발급
+            // 새 AccessToken 발급
             String newAccessToken = tokenProvider.recreateAccessToken(accessToken);
 
-            // 새 Refresh Token 발급 및 쿠키 설정
+            // 새 RefreshToken 발급 및 쿠키 설정
             String newRefreshToken = tokenProvider.createRefreshToken();
 
             // 로그인 정보 객체
             org.springframework.security.core.userdetails.User securityUser = tokenProvider.getUserFromAccessToken(newAccessToken);
 
-            // 새로운 Refresh Token을 DB에 저장
+            // 새로운 RefreshToken을 DB에 저장
             Integer userId = Integer.parseInt(securityUser.getUsername());
             org.stepup.cinesquareapis.user.entity.User cineUser = userRepository.findById(userId)
                     .orElseThrow(() -> new RestApiException(CustomErrorCode.NOT_FOUND_USER));

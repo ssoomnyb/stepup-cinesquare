@@ -16,13 +16,8 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.authentication.WebAuthenticationDetails;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.stepup.cinesquareapis.auth.entity.UserRefreshToken;
 import org.stepup.cinesquareapis.auth.repository.UserRefreshTokenRepository;
-import org.stepup.cinesquareapis.common.exception.enums.CommonErrorCode;
-import org.stepup.cinesquareapis.common.exception.enums.CustomErrorCode;
-import org.stepup.cinesquareapis.common.exception.exception.RestApiException;
 import org.stepup.cinesquareapis.user.repository.UserRepository;
-import org.stepup.cinesquareapis.util.CookieUtil;
 
 import java.io.IOException;
 import java.util.List;
@@ -41,53 +36,51 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // 인증 정보를 설정
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        // 특정 경로에 대해 필터를 건너뛰기
-        if (shouldNotFilter(request)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // 1. 엑세스 토큰 추출
-        String accessToken = parseBearerToken(request, HttpHeaders.AUTHORIZATION);
-
         try {
+            // 1. AccessToken 추출
+            String accessToken = parseBearerToken(request, HttpHeaders.AUTHORIZATION);
+
             // 2. 로그인 정보 객체(spring security 지원 user) or 익명 객체 반환
-            User user = getUserFromAccessToken(accessToken);
+            User user = parseUserSpecification(accessToken);
 
             // 3. 스프링 시큐리티에서 사용할 UsernamePasswordAuthenticationToken 객체를 생성
             AbstractAuthenticationToken authenticated = UsernamePasswordAuthenticationToken.authenticated(user, accessToken, user.getAuthorities());
             authenticated.setDetails(new WebAuthenticationDetails(request));
-
             SecurityContextHolder.getContext().setAuthentication(authenticated);
         } catch (ExpiredJwtException e) {
-            // 4. Jwt 토큰이 만료됨, Refresh Token이 유효하다면 Access Token 재생성
-            try {
-                // Refresh Token 추출
-                String refreshToken = extractRefreshToken(request);
-
-                // Refresh 토큰 검증
-                tokenProvider.validateRefreshToken(accessToken, refreshToken);
-
-                // Access Token, Refresh-Token 재발급
-                reissueAccessAndRefreshToken(request, response, accessToken);
-            } catch (RestApiException re) {
-                throw new RestApiException(CommonErrorCode.UNAUTHORIZED);
-            }
-        } catch (RestApiException e) {
-            throw new RestApiException(CommonErrorCode.UNAUTHORIZED);
+            // Jwt 토큰이 만료된 경우, RefreshToken이 유효하다면 AccessToken 재생성
+            reissueAccessToken(request, response, e);
         } catch (Exception e) {
             request.setAttribute("exception", e);
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, e.getMessage());
-            return;
         }
 
         filterChain.doFilter(request, response);
     }
 
-    // 특정 요청에 대해 필터를 건너뛸지 결정하는 메서드
-    public boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return "/api/auth/reissue-access-token".equals(path);
+    // AccessToken 재발급
+    private void reissueAccessToken(HttpServletRequest request, HttpServletResponse response, Exception exception) {
+        try {
+            // 1. RefreshToken, 만료된 AccessToken 추출
+            String refreshToken = parseBearerToken(request, "Refresh-Token");
+            if (refreshToken == null) {
+                throw exception;
+            }
+            String oldAccessToken = parseBearerToken(request, HttpHeaders.AUTHORIZATION);
+
+            // 2. 토큰 검증
+            tokenProvider.validateRefreshToken(refreshToken, oldAccessToken);
+
+            // 3. AccessToken 재발급
+            String newAccessToken = tokenProvider.recreateAccessToken(oldAccessToken);
+            User user = parseUserSpecification(newAccessToken);
+            AbstractAuthenticationToken authenticated = UsernamePasswordAuthenticationToken.authenticated(user, newAccessToken, user.getAuthorities());
+            authenticated.setDetails(new WebAuthenticationDetails(request));
+            SecurityContextHolder.getContext().setAuthentication(authenticated);
+
+            response.setHeader("New-Access-Token", newAccessToken);
+        } catch (Exception e) {
+            request.setAttribute("exception", e);
+        }
     }
 
     // Bearer 토큰 파싱 메서드
@@ -99,7 +92,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     // 로그인 정보 객체 반환 메서드
-    private User getUserFromAccessToken(String token) {
+    private User parseUserSpecification(String token) {
         String[] split = Optional.ofNullable(token)
                 .filter(subject -> subject.length() >= 10)
                 .map(tokenProvider::validateTokenAndGetSubject)
@@ -107,56 +100,5 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 .split(":");
 
         return new User(split[0], "", List.of(new SimpleGrantedAuthority(split[1])));
-    }
-
-    // 사용자 인증 처리 메서드
-    private void authenticateUser(HttpServletRequest request, String accessToken, User user) {
-        AbstractAuthenticationToken authenticationToken = UsernamePasswordAuthenticationToken.authenticated(user, accessToken, user.getAuthorities());
-        authenticationToken.setDetails(new WebAuthenticationDetails(request));
-        SecurityContextHolder.getContext().setAuthentication(authenticationToken);
-    }
-
-    // Refresh Token을 추출하는 메서드 (헤더 우선, 없으면 쿠키에서 추출)
-    private String extractRefreshToken(HttpServletRequest request) {
-        String refreshToken = request.getHeader("Refresh-Token");
-        if (refreshToken == null) {
-            refreshToken = CookieUtil.getCookieValue(request, "Refresh-Token");
-        }
-        if (refreshToken == null) {
-            throw new RestApiException(CustomErrorCode.EXPIRED_ACCESS_TOKEN);
-        }
-        return refreshToken;
-    }
-
-    // Access Token, Refresh-Token 재발급
-    private void reissueAccessAndRefreshToken(HttpServletRequest request, HttpServletResponse response, String oldAccessToken) throws IOException {
-        try {
-            // 새 Access Token 발급
-            String newAccessToken = tokenProvider.recreateAccessToken(oldAccessToken);
-
-            // 로그인 정보 객체
-            User securityUser = getUserFromAccessToken(newAccessToken);
-
-            authenticateUser(request, newAccessToken, securityUser);
-            response.setHeader("New-Access-Token", newAccessToken);
-
-            // 새 Refresh Token 발급 및 쿠키 설정
-            String newRefreshToken = tokenProvider.createRefreshToken();
-            CookieUtil.addCookie(response, "Refresh-Token", newRefreshToken, 10);
-
-            // 새로운 Refresh Token을 DB에 저장
-            Integer userId = Integer.parseInt(securityUser.getUsername());
-            org.stepup.cinesquareapis.user.entity.User cineUser = userRepository.findById(userId)
-                    .orElseThrow(() -> new RestApiException(CustomErrorCode.NOT_FOUND_USER));
-
-            UserRefreshToken newUserRefreshToken = new UserRefreshToken(cineUser, newRefreshToken, 10);
-            userRefreshTokenRepository.save(newUserRefreshToken);
-        } catch (RestApiException ex) {
-            request.setAttribute("exception", ex);
-            response.sendError(ex.getErrorCode().getHttpStatus().value(), ex.getErrorCode().getMessage());
-        } catch (Exception ex) {
-            request.setAttribute("exception", ex);
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Token has expired and reissue failed");
-        }
     }
 }
